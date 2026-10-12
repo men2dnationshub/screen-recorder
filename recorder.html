@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Screen Recorder</title>
+<meta name="theme-color" content="#0B5ED7">
+<link rel="manifest" id="manifestLink">
+<style>
+  :root{--navy:#061A40;--blue:#0B5ED7;--gold:#F4B41A;--white:#FFFFFF;--gray:#E9EDF2;--bg:var(--white);--text:var(--navy);--card:var(--gray);--muted:#5A6B85;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#071426;--text:#EAF1FB;--card:#0E2647;--muted:#9FB2CE;}}
+  :root[data-theme="dark"]{--bg:#071426;--text:#EAF1FB;--card:#0E2647;--muted:#9FB2CE;}
+  html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+  body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;padding:24px 16px}
+  .wrap{width:100%;max-width:520px}
+  h1{font-size:1.4rem;margin:0 0 4px;color:var(--blue)}
+  .tag{color:var(--muted);font-size:.85rem;margin:0 0 20px}
+  .card{background:var(--card);border-radius:14px;padding:18px;margin-bottom:16px}
+  video{width:100%;border-radius:10px;background:#000;display:none;margin-bottom:12px}
+  .status{font-size:.9rem;color:var(--muted);margin-bottom:12px;min-height:1.2em}
+  .timer{font-size:2rem;font-weight:700;color:var(--text);text-align:center;margin:8px 0;display:none}
+  .dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:#C0392B;margin-right:8px;animation:blink 1s infinite}
+  .dot.paused{animation:none;background:var(--gold)}
+  @keyframes blink{50%{opacity:.25}}
+  button{width:100%;padding:14px;font-size:1rem;font-weight:600;border:none;border-radius:10px;cursor:pointer;margin-top:8px}
+  .row{display:flex;gap:6px}
+  .row button{margin-top:0;padding:14px 6px;font-size:.88rem}
+  #startBtn{background:var(--blue);color:#fff}
+  #pauseBtn{background:var(--gold);color:var(--navy)}
+  #stopBtn{background:#C0392B;color:#fff}
+  .field{margin-bottom:14px}
+  label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:6px}
+  .toggle{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:.92rem}
+  .toggle input{width:18px;height:18px}
+  input[type=text],select{width:100%;padding:10px;border-radius:8px;border:1px solid var(--muted);background:var(--bg);color:var(--text);font-size:.92rem}
+  ol{color:var(--muted);font-size:.85rem;padding-left:20px;line-height:1.6}
+  .note{font-size:.78rem;color:var(--muted);line-height:1.5}
+  .rec-item{display:flex;justify-content:space-between;align-items:center;background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:.85rem}
+  .rec-item .meta{color:var(--muted);font-size:.78rem}
+  .rec-actions a,.rec-actions button{display:inline-block;width:auto;padding:6px 10px;margin:0 0 0 6px;font-size:.78rem;border-radius:6px}
+  .rec-actions a{background:var(--gold);color:var(--navy);text-decoration:none;font-weight:700}
+  .rec-actions button{background:transparent;border:1px solid var(--muted);color:var(--muted)}
+  h2{font-size:1rem;margin:0 0 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Screen Recorder</h1>
+  <p class="tag">Record any call, class, or screen activity — camera bubble, pause/resume, nothing uploaded.</p>
+
+  <div class="card" id="setupCard">
+    <div class="toggle"><input type="checkbox" id="camToggle"><label for="camToggle" style="margin:0">Include camera bubble</label></div>
+    <div class="field"><label for="bubbleSize">Camera bubble size</label>
+      <select id="bubbleSize"><option value="small">Small</option><option value="medium" selected>Medium</option><option value="large">Large</option></select>
+    </div>
+    <div class="toggle"><input type="checkbox" id="micToggle"><label for="micToggle" style="margin:0">Include microphone</label></div>
+    <div class="toggle"><input type="checkbox" id="watermarkToggle" checked><label for="watermarkToggle" style="margin:0">Add brand watermark</label></div>
+    <div class="field"><label for="format">Format</label>
+      <select id="format"><option value="webm">WebM (best compatibility)</option><option value="mp4" id="mp4Option">MP4 (plays everywhere)</option></select>
+      <p class="note" id="mp4Note" style="display:none;margin-top:6px">Your browser doesn't support recording directly to MP4 — it'll save as WebM instead. You can convert it afterward with a free tool like CloudConvert.</p>
+    </div>
+    <div class="field"><label for="quality">Quality</label>
+      <select id="quality"><option value="standard">Standard (smaller file)</option><option value="high">High (sharper, larger file)</option></select>
+    </div>
+    <div class="field"><label for="prefix">File name</label>
+      <input type="text" id="prefix" value="recording">
+    </div>
+    <button id="startBtn">Start Recording</button>
+  </div>
+
+  <div class="card" id="recCard" style="display:none">
+    <video id="preview" muted autoplay playsinline></video>
+    <div class="status" id="status"></div>
+    <div class="timer" id="timer"><span class="dot" id="dot"></span><span id="timeText">00:00</span></div>
+    <div class="row">
+      <button id="pauseBtn">Pause</button>
+      <button id="markBtn" style="background:var(--blue);color:#fff">Mark</button>
+      <button id="stopBtn">Stop</button>
+    </div>
+  </div>
+
+  <div class="card" id="libraryCard" style="display:none">
+    <h2>Your Recordings</h2>
+    <div id="library"></div>
+  </div>
+
+  <div class="card">
+    <strong>How to use it</strong>
+    <ol>
+      <li>Open what you want to record (Meet, Zoom, Excel, Power BI, anything).</li>
+      <li>Choose your options, then click Start Recording.</li>
+      <li>Pick the tab, window, or screen in the browser's share picker. Turn on "Share tab audio" if you chose a tab.</li>
+      <li>Use Pause if you need a break. Tap Mark to drop a chapter timestamp (e.g. "VLOOKUP demo starts") — it exports as a text file ready for your YouTube description. Stop when you're done.</li>
+      <li>Download from the list below — recordings stay listed until you close this page.</li>
+    </ol>
+    <p class="note">Works in desktop Chrome, Edge or Brave. Camera bubble and mic need their own permission prompt the first time. Files save as .webm.</p>
+  </div>
+
+  <p style="text-align:center;font-size:.78rem;color:var(--muted);margin:20px 0 0">Developed by Mensimah Resources Services</p>
+</div>
+
+<video id="camVideoEl" style="position:fixed;top:-9999px;left:-9999px;width:2px;height:2px;opacity:0;pointer-events:none" muted autoplay playsinline></video>
+<video id="screenVideoEl" style="position:fixed;top:-9999px;left:-9999px;width:2px;height:2px;opacity:0;pointer-events:none" muted autoplay playsinline></video>
+<canvas id="canvas" style="display:none"></canvas>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const setupCard=$('setupCard'), recCard=$('recCard'), libraryCard=$('libraryCard'), library=$('library');
+  const startBtn=$('startBtn'), pauseBtn=$('pauseBtn'), stopBtn=$('stopBtn'), markBtn=$('markBtn');
+  const preview=$('preview'), status=$('status'), timerEl=$('timer'), timeText=$('timeText'), dot=$('dot');
+  const camVideoEl=$('camVideoEl'), screenVideoEl=$('screenVideoEl'), canvas=$('canvas');
+  const ctx = canvas.getContext('2d');
+
+  let screenStream, camMicStream, audioCtx, finalStream, recorder, chunks=[];
+  let startTime, pausedMs=0, pauseStart, timerInterval, drawing=false, recordings=[], markers=[];
+
+  const MP4_CANDIDATES = ['video/mp4;codecs=h264,aac','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4'];
+  const WEBM_CANDIDATES = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  function pickMime(list){ return list.find(m => MediaRecorder.isTypeSupported(m)) || ''; }
+  const mp4Mime = pickMime(MP4_CANDIDATES);
+  if(!mp4Mime){ $('mp4Option').disabled = true; $('mp4Note').style.display='block'; }
+  $('format').addEventListener('change', ()=>{ $('mp4Note').style.display = ($('format').value==='mp4' && !mp4Mime) ? 'block' : 'none'; });
+
+  function fmt(ms){const s=Math.floor(ms/1000);return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;}
+  function fmtSize(b){return b>1e6?(b/1e6).toFixed(1)+' MB':(b/1e3).toFixed(0)+' KB';}
+
+  function drawFrame(){
+    if(!drawing) return;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(screenVideoEl,0,0,canvas.width,canvas.height);
+    if($('camToggle').checked && camVideoEl.videoWidth){
+      const sizeMap={small:50,medium:70,large:110};
+      const r=sizeMap[$('bubbleSize').value]||70, cx=canvas.width-r-24, cy=canvas.height-r-24;
+      ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.closePath(); ctx.clip();
+      const vw=camVideoEl.videoWidth, vh=camVideoEl.videoHeight, scale=Math.max((r*2)/vw,(r*2)/vh);
+      ctx.drawImage(camVideoEl, cx-(vw*scale)/2, cy-(vh*scale)/2, vw*scale, vh*scale);
+      ctx.restore();
+      ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.lineWidth=4; ctx.strokeStyle='#F4B41A'; ctx.stroke();
+    }
+    if($('watermarkToggle').checked) drawWatermark();
+    requestAnimationFrame(drawFrame);
+  }
+
+  function drawWatermark(){
+    const text='Mfon the Digital Skills Trainer';
+    const fontSize=Math.max(14, Math.round(canvas.width*0.016));
+    ctx.font = `600 ${fontSize}px -apple-system, Segoe UI, sans-serif`;
+    const padX=14, h=fontSize+16, w=ctx.measureText(text).width+padX*2, x=16, y=canvas.height-h-16;
+    ctx.fillStyle='rgba(6,26,64,0.72)';
+    if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(x,y,w,h,8); ctx.fill(); } else { ctx.fillRect(x,y,w,h); }
+    ctx.fillStyle='#F4B41A';
+    ctx.textBaseline='middle';
+    ctx.fillText(text, x+padX, y+h/2);
+  }
+
+  async function startRecording(){
+    try{
+      screenStream = await navigator.mediaDevices.getDisplayMedia({video:{cursor:'always'},audio:true});
+    }catch(e){ status.textContent='Screen share was cancelled or blocked.'; return; }
+
+    const wantCam=$('camToggle').checked, wantMic=$('micToggle').checked;
+    let camError = null;
+    if(wantCam||wantMic){
+      try{
+        camMicStream = await navigator.mediaDevices.getUserMedia({video:wantCam, audio:wantMic});
+        if(wantCam && !camMicStream.getVideoTracks().length) camError = 'No camera track was returned.';
+      }
+      catch(e){
+        camError = e.name==='NotFoundError' ? 'No camera or microphone found on this device.'
+                  : e.name==='NotAllowedError' ? 'Camera/mic permission was denied or blocked.'
+                  : `Camera/mic error: ${e.name}.`;
+      }
+    }
+
+    screenVideoEl.srcObject = screenStream;
+    screenVideoEl.play().catch(()=>{});
+    const settings = screenStream.getVideoTracks()[0].getSettings();
+    canvas.width = settings.width||1280; canvas.height = settings.height||720;
+
+    if(wantCam && camMicStream && camMicStream.getVideoTracks().length){
+      camVideoEl.srcObject = camMicStream;
+      camVideoEl.play().catch(()=>{});
+    }
+    markers = [];
+    drawing = true; requestAnimationFrame(drawFrame);
+    const videoTrack = canvas.captureStream(30).getVideoTracks()[0];
+
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const dest = audioCtx.createMediaStreamDestination();
+    if(screenStream.getAudioTracks().length) audioCtx.createMediaStreamSource(new MediaStream([screenStream.getAudioTracks()[0]])).connect(dest);
+    if(wantMic && camMicStream && camMicStream.getAudioTracks().length) audioCtx.createMediaStreamSource(new MediaStream([camMicStream.getAudioTracks()[0]])).connect(dest);
+
+    const tracks=[videoTrack]; if(dest.stream.getAudioTracks().length) tracks.push(dest.stream.getAudioTracks()[0]);
+    finalStream = new MediaStream(tracks);
+    preview.srcObject = finalStream; preview.style.display='block';
+
+    const quality = $('quality').value === 'high' ? 8000000 : 2500000;
+    const wantMp4 = $('format').value === 'mp4' && mp4Mime;
+    const mimeType = wantMp4 ? mp4Mime : pickMime(WEBM_CANDIDATES);
+    const ext = wantMp4 ? 'mp4' : 'webm';
+    chunks=[];
+    recorder = new MediaRecorder(finalStream, {mimeType, videoBitsPerSecond:quality});
+    recorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
+    recorder.onstop = () => {
+      drawing=false;
+      const blob = new Blob(chunks,{type: wantMp4 ? 'video/mp4' : 'video/webm'});
+      const url = URL.createObjectURL(blob);
+      const duration = Date.now()-startTime-pausedMs;
+      const prefix = ($('prefix').value||'recording').trim().replace(/[^a-z0-9-_]/gi,'_');
+      const idx = recordings.length+1;
+      const name = `${prefix}-${idx}.${ext}`;
+      let chaptersUrl=null, chaptersName=null;
+      if(markers.length){
+        chaptersUrl = URL.createObjectURL(new Blob([markers.map(m=>`${fmt(m.t)}  ${m.label}`).join('\n')],{type:'text/plain'}));
+        chaptersName = `${prefix}-${idx}-chapters.txt`;
+      }
+      recordings.unshift({url,name,size:blob.size,duration,chaptersUrl,chaptersName});
+      renderLibrary();
+      [screenStream,camMicStream].forEach(s=>s&&s.getTracks().forEach(t=>t.stop()));
+      if(audioCtx) audioCtx.close();
+      clearInterval(timerInterval);
+      recCard.style.display='none'; setupCard.style.display='block';
+      preview.style.display='none'; preview.srcObject=null;
+    };
+
+    screenStream.getVideoTracks()[0].onended = () => { if(recorder.state!=='inactive') stopRecording(); };
+
+    recorder.start(1000);
+    startTime=Date.now(); pausedMs=0;
+    setupCard.style.display='none'; recCard.style.display='block';
+    timerEl.style.display='block'; pauseBtn.textContent='Pause'; dot.classList.remove('paused');
+    status.textContent = camError ? `${camError} Recording screen only.` : 'Recording…';
+    timerInterval=setInterval(()=>{ timeText.textContent=fmt(Date.now()-startTime-pausedMs); },500);
+  }
+
+  function togglePause(){
+    if(recorder.state==='recording'){
+      recorder.pause(); clearInterval(timerInterval);
+      pauseStart=Date.now(); pauseBtn.textContent='Resume'; dot.classList.add('paused'); status.textContent='Paused';
+    } else if(recorder.state==='paused'){
+      recorder.resume(); pausedMs+=Date.now()-pauseStart;
+      timerInterval=setInterval(()=>{ timeText.textContent=fmt(Date.now()-startTime-pausedMs); },500);
+      pauseBtn.textContent='Pause'; dot.classList.remove('paused'); status.textContent='Recording…';
+    }
+  }
+
+  function stopRecording(){ if(recorder && recorder.state!=='inactive') recorder.stop(); }
+
+  function markChapter(){
+    if(!recorder || recorder.state==='inactive') return;
+    const label = prompt('Chapter label (optional):','') || `Chapter ${markers.length+1}`;
+    markers.push({ t: Date.now()-startTime-pausedMs, label });
+  }
+  markBtn.addEventListener('click', markChapter);
+
+  function renderLibrary(){
+    libraryCard.style.display = recordings.length ? 'block':'none';
+    library.innerHTML = recordings.map((r,i)=>`
+      <div class="rec-item">
+        <div><div>${r.name}</div><div class="meta">${fmt(r.duration)} · ${fmtSize(r.size)}</div></div>
+        <div class="rec-actions">${r.chaptersUrl?`<a href="${r.chaptersUrl}" download="${r.chaptersName}">Chapters</a>`:''}<a href="${r.url}" download="${r.name}">Download</a><button onclick="removeRec(${i})">Remove</button></div>
+      </div>`).join('');
+  }
+  window.removeRec = (i) => { URL.revokeObjectURL(recordings[i].url); if(recordings[i].chaptersUrl) URL.revokeObjectURL(recordings[i].chaptersUrl); recordings.splice(i,1); renderLibrary(); };
+
+  startBtn.addEventListener('click', startRecording);
+  pauseBtn.addEventListener('click', togglePause);
+  stopBtn.addEventListener('click', stopRecording);
+
+  const iconSvg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230B5ED7'/><circle cx='50' cy='50' r='22' fill='%23F4B41A'/></svg>`;
+  const manifest = {name:'Screen Recorder',short_name:'ScreenRec',start_url:location.href,display:'standalone',background_color:'#061A40',theme_color:'#0B5ED7',icons:[{src:'data:image/svg+xml,'+encodeURIComponent(iconSvg),sizes:'any',type:'image/svg+xml'}]};
+  document.getElementById('manifestLink').setAttribute('href', URL.createObjectURL(new Blob([JSON.stringify(manifest)],{type:'application/json'})));
+</script>
+</body>
+</html>
