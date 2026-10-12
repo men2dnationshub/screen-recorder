@@ -65,6 +65,8 @@
     <div class="field"><label for="prefix">File name</label>
       <input type="text" id="prefix" value="recording">
     </div>
+    <div class="toggle"><input type="checkbox" id="streamToggle"><label for="streamToggle" style="margin:0">Save directly to disk (for long recordings)</label></div>
+    <p class="note" id="streamNote" style="display:none;margin-top:-6px;margin-bottom:10px">Not supported in this browser — recordings will stay in memory as usual.</p>
     <button id="startBtn">Start Recording</button>
   </div>
 
@@ -112,7 +114,22 @@
   const ctx = canvas.getContext('2d');
 
   let screenStream, camMicStream, audioCtx, finalStream, recorder, chunks=[];
-  let startTime, pausedMs=0, pauseStart, timerInterval, drawing=false, recordings=[], markers=[];
+  let startTime, pausedMs=0, pauseStart, timerInterval, drawing=false, recordings=[], markers=[], drawInterval;
+  let saveHandle=null, saveWritable=null, useStreaming=false, writeQueue=Promise.resolve();
+
+  const streamSupported = !!window.showSaveFilePicker;
+  if(!streamSupported){ $('streamNote').style.display='block'; $('streamToggle').disabled = true; }
+
+  // A Web Worker's timer keeps firing at full speed even when this tab is backgrounded,
+  // unlike a regular setInterval on the main thread, which Chrome clamps to ~1/sec after
+  // a few minutes hidden. This keeps the recording smooth even on long sessions where
+  // you've switched away to the app you're actually recording.
+  let drawWorker = null;
+  try{
+    const workerBlob = new Blob([`setInterval(()=>postMessage(1), ${Math.round(1000/30)});`], {type:'application/javascript'});
+    drawWorker = new Worker(URL.createObjectURL(workerBlob));
+    drawWorker.onmessage = () => drawFrame();
+  }catch(e){ drawWorker = null; }
 
   const MP4_CANDIDATES = ['video/mp4;codecs=h264,aac','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4'];
   const WEBM_CANDIDATES = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
@@ -138,7 +155,6 @@
       ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.lineWidth=4; ctx.strokeStyle='#F4B41A'; ctx.stroke();
     }
     if($('watermarkToggle').checked) drawWatermark();
-    requestAnimationFrame(drawFrame);
   }
 
   function drawWatermark(){
@@ -182,7 +198,8 @@
       camVideoEl.play().catch(()=>{});
     }
     markers = [];
-    drawing = true; requestAnimationFrame(drawFrame);
+    drawing = true;
+    if(!drawWorker) drawInterval = setInterval(drawFrame, 1000/30); // fallback if Workers are unsupported
     const videoTrack = canvas.captureStream(30).getVideoTracks()[0];
 
     audioCtx = new (window.AudioContext||window.webkitAudioContext)();
@@ -198,23 +215,47 @@
     const wantMp4 = $('format').value === 'mp4' && mp4Mime;
     const mimeType = wantMp4 ? mp4Mime : pickMime(WEBM_CANDIDATES);
     const ext = wantMp4 ? 'mp4' : 'webm';
+
+    useStreaming = $('streamToggle').checked && streamSupported;
+    saveHandle = null; saveWritable = null; writeQueue = Promise.resolve();
+    const prefixEarly = ($('prefix').value||'recording').trim().replace(/[^a-z0-9-_]/gi,'_');
+    const idxEarly = recordings.length+1;
+    if(useStreaming){
+      try{
+        saveHandle = await window.showSaveFilePicker({
+          suggestedName: `${prefixEarly}-${idxEarly}.${ext}`,
+          types: [{ description:'Video', accept:{ [wantMp4?'video/mp4':'video/webm']:['.'+ext] } }]
+        });
+        saveWritable = await saveHandle.createWritable();
+      }catch(e){ useStreaming=false; } // picker cancelled or blocked — fall back to in-memory
+    }
+
     chunks=[];
     recorder = new MediaRecorder(finalStream, {mimeType, videoBitsPerSecond:quality});
-    recorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
-    recorder.onstop = () => {
-      drawing=false;
-      const blob = new Blob(chunks,{type: wantMp4 ? 'video/mp4' : 'video/webm'});
-      const url = URL.createObjectURL(blob);
+    recorder.ondataavailable = e => {
+      if(!e.data.size) return;
+      if(useStreaming && saveWritable){ writeQueue = writeQueue.then(()=>saveWritable.write(e.data)).catch(()=>{}); }
+      else { chunks.push(e.data); }
+    };
+    recorder.onstop = async () => {
+      drawing=false; clearInterval(drawInterval);
       const duration = Date.now()-startTime-pausedMs;
-      const prefix = ($('prefix').value||'recording').trim().replace(/[^a-z0-9-_]/gi,'_');
-      const idx = recordings.length+1;
-      const name = `${prefix}-${idx}.${ext}`;
+      const prefix = prefixEarly, idx = idxEarly;
       let chaptersUrl=null, chaptersName=null;
       if(markers.length){
         chaptersUrl = URL.createObjectURL(new Blob([markers.map(m=>`${fmt(m.t)}  ${m.label}`).join('\n')],{type:'text/plain'}));
         chaptersName = `${prefix}-${idx}-chapters.txt`;
       }
-      recordings.unshift({url,name,size:blob.size,duration,chaptersUrl,chaptersName});
+      if(useStreaming && saveWritable){
+        await writeQueue;
+        await saveWritable.close();
+        recordings.unshift({savedToDisk:true, name:saveHandle.name, size:null, duration, chaptersUrl, chaptersName});
+      } else {
+        const blob = new Blob(chunks,{type: wantMp4 ? 'video/mp4' : 'video/webm'});
+        const url = URL.createObjectURL(blob);
+        const name = `${prefix}-${idx}.${ext}`;
+        recordings.unshift({url,name,size:blob.size,duration,chaptersUrl,chaptersName});
+      }
       renderLibrary();
       [screenStream,camMicStream].forEach(s=>s&&s.getTracks().forEach(t=>t.stop()));
       if(audioCtx) audioCtx.close();
@@ -229,7 +270,7 @@
     startTime=Date.now(); pausedMs=0;
     setupCard.style.display='none'; recCard.style.display='block';
     timerEl.style.display='block'; pauseBtn.textContent='Pause'; dot.classList.remove('paused');
-    status.textContent = camError ? `${camError} Recording screen only.` : 'Recording…';
+    status.textContent = camError ? `${camError} Recording screen only.` : (useStreaming ? 'Recording — saving directly to disk…' : 'Recording…');
     timerInterval=setInterval(()=>{ timeText.textContent=fmt(Date.now()-startTime-pausedMs); },500);
   }
 
@@ -257,11 +298,11 @@
     libraryCard.style.display = recordings.length ? 'block':'none';
     library.innerHTML = recordings.map((r,i)=>`
       <div class="rec-item">
-        <div><div>${r.name}</div><div class="meta">${fmt(r.duration)} · ${fmtSize(r.size)}</div></div>
-        <div class="rec-actions">${r.chaptersUrl?`<a href="${r.chaptersUrl}" download="${r.chaptersName}">Chapters</a>`:''}<a href="${r.url}" download="${r.name}">Download</a><button onclick="removeRec(${i})">Remove</button></div>
+        <div><div>${r.name}</div><div class="meta">${fmt(r.duration)}${r.size!=null?' · '+fmtSize(r.size):' · saved to disk'}</div></div>
+        <div class="rec-actions">${r.chaptersUrl?`<a href="${r.chaptersUrl}" download="${r.chaptersName}">Chapters</a>`:''}${r.url?`<a href="${r.url}" download="${r.name}">Download</a>`:'<span style="color:var(--gold);font-weight:700;padding:6px 4px">Saved ✓</span>'}<button onclick="removeRec(${i})">Remove</button></div>
       </div>`).join('');
   }
-  window.removeRec = (i) => { URL.revokeObjectURL(recordings[i].url); if(recordings[i].chaptersUrl) URL.revokeObjectURL(recordings[i].chaptersUrl); recordings.splice(i,1); renderLibrary(); };
+  window.removeRec = (i) => { if(recordings[i].url) URL.revokeObjectURL(recordings[i].url); if(recordings[i].chaptersUrl) URL.revokeObjectURL(recordings[i].chaptersUrl); recordings.splice(i,1); renderLibrary(); };
 
   startBtn.addEventListener('click', startRecording);
   pauseBtn.addEventListener('click', togglePause);
